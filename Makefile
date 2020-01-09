@@ -25,6 +25,13 @@ ifeq "$(NO_XINERAMA)" ""
   PACKAGES += xinerama
 endif
 
+# ==== ImageMagick ====
+# Enables support for --blur-root-tile
+ifeq "$(NO_IMAGEMAGICK)" ""
+  CFG += -DCONFIG_IMAGEMAGICK
+  PACKAGES += MagickWand
+endif
+
 # ==== libconfig ====
 # Enables configuration file parsing support
 ifeq "$(NO_LIBCONFIG)" ""

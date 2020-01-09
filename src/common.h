@@ -110,6 +110,10 @@
 #include <X11/extensions/Xinerama.h>
 #endif
 
+#ifdef CONFIG_IMAGEMAGICK
+#include <MagickWand/MagickWand.h>
+#endif
+
 // Workarounds for missing definitions in very old versions of X headers,
 // thanks to consolers for reporting
 #ifndef PictOpDifference
@@ -589,6 +593,12 @@ typedef struct _options_t {
   bool force_win_blend;
   /// Root window transparency.
   bool root_transparency;
+#ifdef CONFIG_IMAGEMAGICK
+  // Blur root tile options.
+  int blur_root_tile_radius;
+  int blur_root_tile_sigma;
+  double blur_root_tile_resize_ratio;
+#endif
   /// Resize damage for a specific number of pixels.
   int resize_damage;
   /// Whether to unredirect all windows if a full-screen opaque window
@@ -830,6 +840,9 @@ typedef struct _session_t {
   bool root_tile_fill;
   /// Picture of the root window background.
   paint_t root_tile_paint;
+#ifdef CONFIG_IMAGEMAGICK
+  paint_t root_tile_paint_blurred;
+#endif
   /// A region of the size of the screen.
   XserverRegion screen_reg;
   /// Picture of root window. Destination of painting in no-DBE painting

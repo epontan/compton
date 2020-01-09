@@ -51,6 +51,7 @@ __R__ for runtime
 * libxrender (B,R)
 * libXrandr (B,R)
 * libXinerama (B,R) (Can be disabled with `NO_XINERAMA` at compile time)
+* ImageMagick (B,R) (Can be disabled with `NO_IMAGEMAGICK` at compile time)
 * pkg-config (B)
 * make (B)
 * xproto / x11proto (B)

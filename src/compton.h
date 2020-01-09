@@ -309,6 +309,10 @@ static inline void
 free_root_tile(session_t *ps) {
   free_picture(ps, &ps->root_tile_paint.pict);
   free_texture(ps, &ps->root_tile_paint.ptex);
+#ifdef CONFIG_IMAGEMAGICK
+  free_picture(ps, &ps->root_tile_paint_blurred.pict);
+  free_texture(ps, &ps->root_tile_paint_blurred.ptex);
+#endif
   if (ps->root_tile_fill)
     free_pixmap(ps, &ps->root_tile_paint.pixmap);
   ps->root_tile_paint.pixmap = None;

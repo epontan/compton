@@ -803,6 +803,46 @@ recheck_focus(session_t *ps) {
   return NULL;
 }
 
+#ifdef CONFIG_IMAGEMAGICK
+static Pixmap
+blur_pixmap(session_t *ps, Pixmap *pixmap) {
+  int radius = ps->o.blur_root_tile_radius;
+  int sigma = ps->o.blur_root_tile_sigma;
+  double resize_ratio = ps->o.blur_root_tile_resize_ratio;
+
+  MagickWand *magick_wand = magick_wand = NewMagickWand();
+  XImage *image = XGetImage(ps->dpy, *pixmap, 0, 0,
+      ps->root_width, ps->root_height, AllPlanes, ZPixmap);
+
+  MagickConstituteImage(magick_wand, image->width, image->height,
+      "RGBA", CharPixel, image->data);
+
+  MagickResizeImage(magick_wand,
+      image->width * resize_ratio,
+      image->height * resize_ratio,
+      GaussianFilter);
+  MagickBlurImage(magick_wand, radius, sigma);
+  MagickResizeImage(magick_wand,
+      image->width, image->height,
+      GaussianFilter);
+
+  MagickExportImagePixels(magick_wand, 0, 0,
+      image->width, image->height, "RGBA", CharPixel, image->data);
+
+  Pixmap pixmap_blurred = XCreatePixmap(ps->dpy, ps->root,
+      ps->root_width, ps->root_height, ps->depth);
+  GC gc = XCreateGC(ps->dpy, pixmap_blurred, 0, 0);
+  XPutImage(ps->dpy, pixmap_blurred, gc, image, 0, 0, 0, 0,
+      ps->root_width, ps->root_height);
+
+  XFreeGC(ps->dpy, gc);
+  XDestroyImage(image);
+  DestroyMagickWand(magick_wand);
+
+  return pixmap_blurred;
+}
+#endif
+
 static bool
 get_root_tile(session_t *ps) {
   /*
@@ -815,6 +855,9 @@ get_root_tile(session_t *ps) {
 
   bool fill = false;
   Pixmap pixmap = None;
+#ifdef CONFIG_IMAGEMAGICK
+  Pixmap pixmap_blurred = None;
+#endif
 
   // Get the values of background attributes
   for (int p = 0; background_props_str[p]; p++) {
@@ -840,6 +883,11 @@ get_root_tile(session_t *ps) {
     fill = true;
   }
 
+#ifdef CONFIG_IMAGEMAGICK
+  if (ps->o.blur_root_tile_radius || ps->o.blur_root_tile_sigma)
+    pixmap_blurred = blur_pixmap(ps, &pixmap);
+#endif
+
   // Create Picture
   {
     XRenderPictureAttributes pa = {
@@ -848,6 +896,13 @@ get_root_tile(session_t *ps) {
     ps->root_tile_paint.pict = XRenderCreatePicture(
         ps->dpy, pixmap, XRenderFindVisualFormat(ps->dpy, ps->vis),
         CPRepeat, &pa);
+
+#ifdef CONFIG_IMAGEMAGICK
+    if (pixmap_blurred)
+      ps->root_tile_paint_blurred.pict = XRenderCreatePicture(
+          ps->dpy, pixmap_blurred, XRenderFindVisualFormat(ps->dpy, ps->vis),
+          CPRepeat, &pa);
+#endif
   }
 
   // Fill pixmap if needed
@@ -859,11 +914,24 @@ get_root_tile(session_t *ps) {
     XRenderFillRectangle(ps->dpy, PictOpSrc, ps->root_tile_paint.pict, &c, 0, 0, 1, 1);
   }
 
+
   ps->root_tile_fill = fill;
   ps->root_tile_paint.pixmap = pixmap;
+#ifdef CONFIG_IMAGEMAGICK
+  ps->root_tile_paint_blurred.pixmap = pixmap_blurred;
+#endif
+
 #ifdef CONFIG_VSYNC_OPENGL
   if (BKEND_GLX == ps->o.backend)
-    return glx_bind_pixmap(ps, &ps->root_tile_paint.ptex, ps->root_tile_paint.pixmap, 0, 0, 0);
+  {
+    return
+#ifdef CONFIG_IMAGEMAGICK
+      (!pixmap_blurred || glx_bind_pixmap(ps, &ps->root_tile_paint_blurred.ptex,
+        ps->root_tile_paint_blurred.pixmap, 0, 0, 0)) &&
+#endif
+      glx_bind_pixmap(ps, &ps->root_tile_paint.ptex,
+        ps->root_tile_paint.pixmap, 0, 0, 0);
+  }
 #endif
 
   return true;
@@ -1630,6 +1698,11 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
 
   if (ps->o.root_transparency && dopacity > 0) {
     paint_t *paint = &ps->root_tile_paint;
+
+#ifdef CONFIG_IMAGEMAGICK
+    if (ps->root_tile_paint_blurred.pixmap)
+      paint = &ps->root_tile_paint_blurred;
+#endif
 
     render(ps, x, y, x, y, wid, hei, 1, false, false,
         paint->pict, paint->ptex,
@@ -4729,6 +4802,21 @@ usage(int ret) {
     "  This improves readability in many cases since random content from\n"
     "  underlying windows will not be shown.\n"
     "\n"
+#undef WARNING
+#ifndef CONFIG_IMAGEMAGICK
+#define WARNING WARNING_DISABLED
+#else
+#define WARNING
+#endif
+    "--blur-root-tile radius,sigma,resize_ratio\n"
+    "  Blur the root tile which is only useful when --root-transparency is\n"
+    "  used" WARNING ".\n"
+    "  Arguments:\n"
+    "    radius: in pixels, not counting the center pixel\n"
+    "    sigma: in pixels, the standard deviation\n"
+    "    resize_ratio: resize ratio before applying blur\n"
+    "  Example: 18,8,0.2\n"
+    "\n"
     "--resize-damage integer\n"
     "  Resize damaged region by a specific number of pixels. A positive\n"
     "  value enlarges it while a negative one shrinks it. Useful for\n"
@@ -5142,6 +5230,40 @@ parse_matrix(session_t *ps, const char *src, const char **endptr) {
 parse_matrix_err:
   free(matrix);
   return NULL;
+}
+
+/**
+ * Parse blur-root-tile arguments
+ */
+static inline bool
+parse_blur_format(session_t *ps, const char *src) {
+#ifdef CONFIG_IMAGEMAGICK
+  const char *pc = NULL;
+  double val = 0.0;
+
+  if (src == (pc = parse_matrix_readnum(src, &val)))
+    goto parse_blur_format_err;
+  src = pc;
+  ps->o.blur_root_tile_radius = val;
+
+  if (src == (pc = parse_matrix_readnum(src, &val)))
+    goto parse_blur_format_err;
+  src = pc;
+  ps->o.blur_root_tile_sigma = val;
+
+  if (src == (pc = parse_matrix_readnum(src, &val)))
+    goto parse_blur_format_err;
+  src = pc;
+  ps->o.blur_root_tile_resize_ratio = val;
+
+  return true;
+parse_blur_format_err:
+  printf_errf("(): Couldn't parse blur format");
+  return false;
+#else
+  printf_errf("(): --blur-root-tile is disabled due to NO_IMAGEMAGICK");
+  return false;
+#endif
 }
 
 /**
@@ -5637,6 +5759,10 @@ parse_config(session_t *ps, struct options_tmp *pcfgtmp) {
     exit(1);
   // --root-transparency
   lcfg_lookup_bool(&cfg, "root-transparency", &ps->o.root_transparency);
+  // --blur-root-tile
+  if (config_lookup_string(&cfg, "blur-root-tile", &sval)
+      && !parse_blur_format(ps, sval))
+    exit(1);
   // --resize-damage
   lcfg_lookup_int(&cfg, "resize-damage", &ps->o.resize_damage);
   // --glx-no-stencil
@@ -5774,6 +5900,7 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
     { "reredir-on-root-change", no_argument, NULL, 731 },
     { "glx-reinit-on-root-change", no_argument, NULL, 732 },
     { "root-transparency", no_argument, NULL, 801 },
+    { "blur-root-tile", required_argument, NULL, 802 },
     // Must terminate with a NULL entry
     { NULL, 0, NULL, 0 },
   };
@@ -6046,6 +6173,10 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
       P_CASEBOOL(731, reredir_on_root_change);
       P_CASEBOOL(732, glx_reinit_on_root_change);
       P_CASEBOOL(801, root_transparency);
+      case 802:
+        if (!parse_blur_format(ps, optarg))
+          exit(1);
+        break;
       default:
         usage(1);
         break;
@@ -6977,6 +7108,9 @@ session_init(session_t *ps_old, int argc, char **argv) {
     .overlay = None,
     .root_tile_fill = false,
     .root_tile_paint = PAINT_INIT,
+#ifdef CONFIG_IMAGEMAGICK
+    .root_tile_paint_blurred = PAINT_INIT,
+#endif
     .screen_reg = None,
     .tgt_picture = None,
     .tgt_buffer = PAINT_INIT,
@@ -6998,6 +7132,11 @@ session_init(session_t *ps_old, int argc, char **argv) {
       .detect_rounded_corners = false,
       .paint_on_overlay = false,
       .root_transparency = false,
+#ifdef CONFIG_IMAGEMAGICK
+      .blur_root_tile_radius = 0,
+      .blur_root_tile_sigma = 0,
+      .blur_root_tile_resize_ratio = 1.0,
+#endif
       .resize_damage = 0,
       .unredir_if_possible = false,
       .unredir_if_possible_blacklist = NULL,
@@ -7779,6 +7918,10 @@ main(int argc, char **argv) {
     sigaction(SIGUSR1, &action, NULL);
   }
 
+#ifdef CONFIG_IMAGEMAGICK
+  MagickWandGenesis();
+#endif
+
   // Main loop
   session_t *ps_old = ps_g;
   while (1) {
@@ -7793,6 +7936,10 @@ main(int argc, char **argv) {
   }
 
   free(ps_g);
+
+#ifdef CONFIG_IMAGEMAGICK
+  MagickWandTerminus();
+#endif
 
   return 0;
 }

@@ -1628,6 +1628,14 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
 
   const double dopacity = get_opacity_percent(w);
 
+  if (ps->o.root_transparency && dopacity > 0) {
+    paint_t *paint = &ps->root_tile_paint;
+
+    render(ps, x, y, x, y, wid, hei, 1, false, false,
+        paint->pict, paint->ptex,
+        reg_paint, pcache_reg, &ps->o.glx_prog_win);
+  }
+
   if (!w->frame_opacity) {
     win_render(ps, w, 0, 0, wid, hei, dopacity, reg_paint, pcache_reg, pict);
   }
@@ -4716,6 +4724,11 @@ usage(int ret) {
     "--blur-background-exclude condition\n"
     "  Exclude conditions for background blur.\n"
     "\n"
+    "--root-transparency\n"
+    "  Transparency is rendered against root window (aka fake transparency).\n"
+    "  This improves readability in many cases since random content from\n"
+    "  underlying windows will not be shown.\n"
+    "\n"
     "--resize-damage integer\n"
     "  Resize damaged region by a specific number of pixels. A positive\n"
     "  value enlarges it while a negative one shrinks it. Useful for\n"
@@ -5622,6 +5635,8 @@ parse_config(session_t *ps, struct options_tmp *pcfgtmp) {
   if (config_lookup_string(&cfg, "blur-kern", &sval)
       && !parse_conv_kern_lst(ps, sval, ps->o.blur_kerns, MAX_BLUR_PASS))
     exit(1);
+  // --root-transparency
+  lcfg_lookup_bool(&cfg, "root-transparency", &ps->o.root_transparency);
   // --resize-damage
   lcfg_lookup_int(&cfg, "resize-damage", &ps->o.resize_damage);
   // --glx-no-stencil
@@ -5758,6 +5773,7 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
     { "no-name-pixmap", no_argument, NULL, 320 },
     { "reredir-on-root-change", no_argument, NULL, 731 },
     { "glx-reinit-on-root-change", no_argument, NULL, 732 },
+    { "root-transparency", no_argument, NULL, 801 },
     // Must terminate with a NULL entry
     { NULL, 0, NULL, 0 },
   };
@@ -6029,6 +6045,7 @@ get_cfg(session_t *ps, int argc, char *const *argv, bool first_pass) {
       P_CASEBOOL(319, no_x_selection);
       P_CASEBOOL(731, reredir_on_root_change);
       P_CASEBOOL(732, glx_reinit_on_root_change);
+      P_CASEBOOL(801, root_transparency);
       default:
         usage(1);
         break;
@@ -6980,6 +6997,7 @@ session_init(session_t *ps_old, int argc, char **argv) {
       .synchronize = false,
       .detect_rounded_corners = false,
       .paint_on_overlay = false,
+      .root_transparency = false,
       .resize_damage = 0,
       .unredir_if_possible = false,
       .unredir_if_possible_blacklist = NULL,

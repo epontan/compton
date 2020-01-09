@@ -587,6 +587,8 @@ typedef struct _options_t {
   bool paint_on_overlay;
   /// Force painting of window content with blending.
   bool force_win_blend;
+  /// Root window transparency.
+  bool root_transparency;
   /// Resize damage for a specific number of pixels.
   int resize_damage;
   /// Whether to unredirect all windows if a full-screen opaque window

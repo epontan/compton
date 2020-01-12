@@ -1,3 +1,9 @@
+# root-transparency branch
+
+Inspired from [EvilPudding's](https://github.com/EvilPudding)
+[fake-transparency](https://github.com/chjj/compton/issues/453)
+[fork](https://github.com/EvilPudding/compton).
+
 # Compton
 
 [![Join the chat at https://gitter.im/chjj/compton](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/chjj/compton?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
